@@ -55,6 +55,12 @@ import           System.Taffybar.Widget.Util
 import           System.Taffybar.WindowIcon
 import           Text.Printf
 
+import qualified Data.HashMap.Strict as HM
+import GI.GdkPixbuf (Pixbuf)
+import Data.Word (Word64)
+import Data.IORef
+import System.IO.Unsafe (unsafePerformIO)
+
 data WorkspaceState
   = Active
   | Visible
@@ -423,6 +429,8 @@ rateLimitFn context =
   generateRateLimitedFunction $ PerInvocation rate
 
 onWorkspaceUpdate :: WorkspacesContext -> IO (Event -> IO ())
+onWorkspaceUpdate _ = return $ const $ return ()
+{-
 onWorkspaceUpdate context = do
   rateLimited <- rateLimitFn context doUpdate combineRequests
   let withLog event = do
@@ -435,6 +443,7 @@ onWorkspaceUpdate context = do
   where
     combineRequests _ b = Just (b, const ((), ()))
     doUpdate _ = postGUIASync $ runReaderT updateAllWorkspaceWidgets context
+-}
 
 onIconChanged :: (Set.Set X11Window -> IO ()) -> Event -> IO ()
 onIconChanged handler event =
@@ -688,9 +697,22 @@ handleIconGetterException getter size windowData =
     wLog WARNING $ printf "Failed to get window icon for %s: %s" (show windowData) (show e)
     return Nothing
 
+-- FIXME: update cache when a window is closed?
+-- FIXME: unsafePerformIO
+windowIconPixbufFromEWMHCache :: IORef (HM.HashMap Word64 (Maybe Pixbuf))
+windowIconPixbufFromEWMHCache = unsafePerformIO (newIORef HM.empty)
+{-# NOINLINE windowIconPixbufFromEWMHCache #-}
+
 getWindowIconPixbufFromEWMH :: WindowIconPixbufGetter
-getWindowIconPixbufFromEWMH = handleIconGetterException $ \size windowData ->
-  runX11Def Nothing (getIconPixBufFromEWMH size $ windowId windowData)
+getWindowIconPixbufFromEWMH = handleIconGetterException $ \size windowData -> do
+  let winId = windowId windowData
+  ewmh <- liftIO $ readIORef windowIconPixbufFromEWMHCache
+  case HM.lookup winId ewmh of
+    Nothing   -> do
+      pb_m <- runX11Def Nothing (getIconPixBufFromEWMH size $ windowId windowData)
+      liftIO $ modifyIORef' windowIconPixbufFromEWMHCache (HM.insert winId pb_m)
+      return pb_m
+    Just pb_m -> return pb_m
 
 getWindowIconPixbufFromClass :: WindowIconPixbufGetter
 getWindowIconPixbufFromClass = handleIconGetterException $ \size windowData ->
@@ -801,10 +823,12 @@ updateImages ic ws = do
           then justWindows ++
                replicate (minIcons cfg - length justWindows) Nothing
           else justWindows ++ repeat Nothing
-  newImgs <-
-    zipWithM updateIconWidget' getImgs windowDatas
-  when newImagesNeeded $ lift $ Gtk.widgetShowAll $ iconsContainer ic
-  return newImgs
+  case newImagesNeeded of
+    True -> do
+      newImgs <- zipWithM updateIconWidget' getImgs windowDatas
+      lift $ Gtk.widgetShowAll $ iconsContainer ic
+      return newImgs
+    False -> return (iconImages ic)
 
 getWindowStatusString :: WindowData -> T.Text
 getWindowStatusString windowData = T.toLower $ T.pack $

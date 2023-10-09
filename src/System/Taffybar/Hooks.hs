@@ -24,6 +24,7 @@ module System.Taffybar.Hooks
 import           BroadcastChan
 import           Control.Concurrent
 import           Control.Monad
+import           Control.Monad.IO.Class
 import           Control.Monad.Trans.Class
 import           Control.Monad.Trans.Reader
 import qualified Data.MultiMap as MM
@@ -36,6 +37,9 @@ import           System.Taffybar.Information.Network
 import           System.Environment.XDG.DesktopEntry
 import           System.Taffybar.LogFormatter
 import           System.Taffybar.Util
+
+import           System.IO.Unsafe
+import           Data.IORef
 
 -- | The type of the channel that provides network information in taffybar.
 newtype NetworkInfoChan =
@@ -82,5 +86,9 @@ updateDirectoryEntriesCache = ask >>= \ctx ->
 -- | Read 'DesktopEntry' values into a 'MM.Multimap', where they are indexed by
 -- the class name specified in the 'DesktopEntry'.
 readDirectoryEntriesDefault :: TaffyIO (MM.MultiMap String DesktopEntry)
-readDirectoryEntriesDefault = lift $
-  indexDesktopEntriesByClassName <$> getDirectoryEntriesDefault
+readDirectoryEntriesDefault = liftIO $ readIORef directoryEntriesDefaultCache
+
+directoryEntriesDefaultCache :: IORef (MM.MultiMap String DesktopEntry)
+directoryEntriesDefaultCache = unsafePerformIO $ do
+  (indexDesktopEntriesByClassName <$> getDirectoryEntriesDefault) >>= newIORef
+{-# NOINLINE directoryEntriesDefaultCache #-}
