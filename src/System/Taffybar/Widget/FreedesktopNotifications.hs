@@ -245,15 +245,15 @@ notifyAreaNew cfg = liftIO $ do
 
   bLabel <- labelNew (Nothing :: Maybe Text)
   widgetSetName bLabel "NotificationCloseButton"
-  labelSetMarkup bLabel "×"
+  labelSetMarkup bLabel "[×]"
 
   labelSetMaxWidthChars textArea (fromIntegral $ notificationMaxLength cfg)
   labelSetEllipsize textArea Pango.EllipsizeModeEnd
 
   containerAdd button bLabel
+  boxPackStart box button False False 0
   boxPackStart box textArea True True 0
   boxPackStart box sep False False 0
-  boxPackStart box button False False 0
 
   containerAdd frame box
 
